@@ -1,0 +1,20 @@
+{
+  "name": "researchgate-be",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Read-only API over the PSO + LS-SVM results published to MongoDB (ResearchGate db). Deployed on Vercel.",
+  "type": "module",
+  "main": "api/index.js",
+  "engines": { "node": "22.x" },
+  "scripts": {
+    "dev": "node --watch server.js",
+    "start": "node server.js",
+    "check": "node --check api/index.js && node --check lib/data.js && node --check lib/db.js && node --check lib/compute.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "mongodb": "^6.12.0"
+  }
+}
