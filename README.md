@@ -49,7 +49,7 @@ npm run dev               # http://localhost:8891/api/health
 1. vercel.com → **Add New… → Project** → import `ddhruvui/ResearchGateBE`.
    Framework preset: **Other**. Leave build and output settings empty.
 2. Under **Environment Variables** add `MONGO_URI`, `DB_PASSWORD`, `MONGO_DB`,
-   `RUN_ID` (and later `ALLOWED_ORIGINS=https://<your-render-site>.onrender.com`).
+   `RUN_ID` (and later `ALLOWED_ORIGINS=https://researchgatefe.onrender.com`).
 3. Deploy. Check `https://<project>.vercel.app/api/health`.
 
 `vercel.json` rewrites every path to `api/index.js`, so Express handles routing.
