@@ -7,7 +7,7 @@ import express from 'express'
 import cors from 'cors'
 import {
   dbName, defaultRun, cachedAt, getRun, getEquity, computeEquity,
-  getNextSession, queryPredictions, listRuns,
+  getNextSession, queryPredictions, listRuns, getStrategyList, getStrategyTicker,
 } from '../lib/data.js'
 
 const app = express()
@@ -39,6 +39,8 @@ const ENDPOINTS = {
   '/api/tickers': 'per-ticker leaderboard',
   '/api/next-session': "tomorrow's paper-trade predictions",
   '/api/predictions?ticker=A,B&from=YYYY-MM-DD&to=&source=live|backtest&page=1&limit=500': 'graded rows',
+  '/api/strategy': '$10k-per-stock stop-loss paper trade: rollup + per-ticker totals',
+  '/api/strategy/:ticker': 'one stock, including the daily balance series per stop level',
   '/api/runs': 'every published run',
 }
 
@@ -103,6 +105,39 @@ app.get('/api/next-session', wrap(async (req, res) => {
     down: rows.filter(r => r.pred <= 0).length,
     rows,
   })
+}))
+
+app.get('/api/strategy', wrap(async (req, res) => {
+  const run = runOf(req)
+  const r = await getRun(run)
+  if (!r) return unpublished(res, run)
+  const rows = await getStrategyList(run)
+  if (!rows.length) {
+    return res.status(404).json({
+      error: `run "${run}" has no stop-loss strategy published`,
+      hint: 'python3 -m src.strategy && python3 -m src.publish_mongo (ResearchGate repo)',
+    })
+  }
+  res.json({
+    runId: run,
+    meta: r.strategy?.meta ?? null,
+    rollup: r.strategy?.rollup ?? null,
+    stops: rows[0].stops ?? [],
+    startCapital: rows[0].startCapital ?? null,
+    rows,
+    loadedAt: iso(cachedAt(`strat:${run}`)),
+  })
+}))
+
+app.get('/api/strategy/:ticker', wrap(async (req, res) => {
+  const run = runOf(req)
+  const doc = await getStrategyTicker(run, req.params.ticker)
+  if (!doc) {
+    return res.status(404).json({
+      error: `no strategy for ${String(req.params.ticker).toUpperCase()} in run "${run}"`,
+    })
+  }
+  res.json({ runId: run, ...doc })
 }))
 
 app.get('/api/predictions', wrap(async (req, res) => {
