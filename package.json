@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "node --watch server.js",
     "start": "node server.js",
-    "check": "node --check api/index.js && node --check lib/data.js && node --check lib/db.js && node --check lib/compute.js"
+    "check": "node --check api/index.js && node --check lib/data.js && node --check lib/db.js && node --check lib/compute.js && node --check lib/quotes.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

@@ -9,6 +9,7 @@ import {
   dbName, defaultRun, cachedAt, getRun, getEquity, computeEquity,
   getNextSession, queryPredictions, listRuns, getStrategyList, getStrategyTicker,
 } from '../lib/data.js'
+import { liveQuotes } from '../lib/quotes.js'
 
 const app = express()
 app.disable('x-powered-by')
@@ -38,6 +39,7 @@ const ENDPOINTS = {
   '/api/equity?costBps=N&tickers=A,B': 'equity curve points + stats',
   '/api/tickers': 'per-ticker leaderboard',
   '/api/next-session': "tomorrow's paper-trade predictions",
+  '/api/live-price?tickers=A,B': 'current EODHD price per ticker, never cached',
   '/api/predictions?ticker=A,B&from=YYYY-MM-DD&to=&source=live|backtest&page=1&limit=500': 'graded rows',
   '/api/strategy': '$10k-per-stock stop-loss paper trade: rollup + per-ticker totals',
   '/api/strategy/:ticker': 'one stock, including the daily balance series per stop level',
@@ -107,6 +109,23 @@ app.get('/api/next-session', wrap(async (req, res) => {
   })
 }))
 
+/**
+ * The price column behind the button on "Tomorrow's prediction". Deliberately
+ * uncached at every layer — the caller asked for the tape as it is right now,
+ * and a 60 s edge cache would quietly serve them a stale one.
+ */
+app.get('/api/live-price', wrap(async (req, res) => {
+  res.set('Cache-Control', 'no-store')
+  const tickers = [...new Set(String(req.query.tickers || '')
+    .split(',').map(s => s.trim().toUpperCase()).filter(Boolean))]
+  if (!tickers.length) return res.status(400).json({ error: 'tickers is required, e.g. ?tickers=AAPL,MSFT' })
+  if (tickers.length > 250) return res.status(400).json({ error: 'at most 250 tickers per call' })
+  if (tickers.some(t => !/^[A-Z0-9.-]{1,12}$/.test(t))) {
+    return res.status(400).json({ error: 'tickers must be plain symbols, e.g. AAPL,BRK-B' })
+  }
+  res.json(await liveQuotes(tickers))
+}))
+
 app.get('/api/strategy', wrap(async (req, res) => {
   const run = runOf(req)
   const r = await getRun(run)
@@ -156,7 +175,9 @@ app.get('/api/runs', wrap(async (_req, res) => {
 app.use((req, res) => res.status(404).json({ error: `no route ${req.method} ${req.path}`, endpoints: ENDPOINTS }))
 app.use((err, _req, res, _next) => {          // eslint-disable-line no-unused-vars
   console.error(err)
-  res.status(500).json({ error: err.message })
+  const status = Number.isInteger(err.status) ? err.status : 500
+  if (status >= 500) res.set('Cache-Control', 'no-store')
+  res.status(status).json({ error: err.message, ...(err.hint ? { hint: err.hint } : {}) })
 })
 
 export default app
