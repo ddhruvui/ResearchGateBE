@@ -6,9 +6,10 @@
 import express from 'express'
 import cors from 'cors'
 import {
-  dbName, defaultRun, cachedAt, getRun, getEquity, computeEquity,
-  getNextSession, queryPredictions, listRuns, getStrategyList, getStrategyTicker,
+  DBS, defaultRun, cachedAt, getRun, getEquity, computeEquity,
+  getNextSession, queryPredictions, listRuns, getStrategyList, getStrategyTicker, getMidrun,
 } from '../lib/data.js'
+import { dbKeyOf } from '../lib/db.js'
 import { liveQuotes } from '../lib/quotes.js'
 
 const app = express()
@@ -27,9 +28,12 @@ app.use('/api', (_req, res, next) => {
 
 const wrap = fn => (req, res, next) => fn(req, res).catch(next)
 const runOf = req => String(req.query.run || defaultRun)
-const unpublished = (res, run) => res.status(404).json({
-  error: `run "${run}" has not been published to ${dbName}`,
-  hint: 'python3 -m src.publish_mongo (ResearchGate repo)',
+// ?db=eod reads the ResearchGateEOD database instead (see lib/db.js); 400 on anything else.
+const dbOf = req => dbKeyOf(req.query.db)
+const unpublished = (res, run, db) => res.status(404).json({
+  error: `run "${run}" has not been published to ${DBS[db]}`,
+  hint: db === 'eod' ? 'bash scripts/sync_from_rg.sh (ResearchGateEOD repo)'
+    : 'python3 -m src.publish_mongo (ResearchGate repo)',
 })
 const iso = ms => (ms ? new Date(ms).toISOString() : null)
 
@@ -39,6 +43,7 @@ const ENDPOINTS = {
   '/api/equity?costBps=N&tickers=A,B': 'equity curve points + stats',
   '/api/tickers': 'per-ticker leaderboard',
   '/api/next-session': "tomorrow's paper-trade predictions",
+  '/api/midrun': "ResearchGateEOD's intraday prediction, as if IB's price were today's close",
   '/api/live-price?tickers=A,B': 'current EODHD price per ticker, never cached',
   '/api/predictions?ticker=A,B&from=YYYY-MM-DD&to=&source=live|backtest&page=1&limit=500': 'graded rows',
   '/api/strategy': '$10k-per-stock stop-loss paper trade: rollup + per-ticker totals',
@@ -47,65 +52,94 @@ const ENDPOINTS = {
 }
 
 app.get('/', (_req, res) => res.json({
-  name: 'ResearchGate API', db: dbName, defaultRun, endpoints: ENDPOINTS,
-  note: 'every endpoint accepts ?run=<run_id>',
+  name: 'ResearchGate API', db: DBS.rg, dbs: DBS, defaultRun, endpoints: ENDPOINTS,
+  note: 'every endpoint accepts ?run=<run_id> and ?db=rg|eod (default rg)',
 }))
 
 app.get('/api/health', wrap(async (req, res) => {
-  const run = runOf(req)
-  const r = await getRun(run)
-  if (!r) return unpublished(res, run)
+  const run = runOf(req), db = dbOf(req)
+  const r = await getRun(db, run)
+  if (!r) return unpublished(res, run, db)
   res.json({
-    ok: true, runId: run, db: dbName,
+    ok: true, runId: run, db: DBS[db],
     rows: r.rows, rowsScored: r.rows_scored, rowsInMongo: r.predictions_in_mongo,
     publishedAt: r.published_at, origin: r.origin, forSession: r.for_session,
-    loadedAt: iso(cachedAt(`run:${run}`)),
+    loadedAt: iso(cachedAt(`${db}:run:${run}`)),
   })
 }))
 
 app.get('/api/summary', wrap(async (req, res) => {
-  const run = runOf(req)
-  const r = await getRun(run)
-  if (!r) return unpublished(res, run)
+  const run = runOf(req), db = dbOf(req)
+  const r = await getRun(db, run)
+  if (!r) return unpublished(res, run, db)
   res.json({
     ...r.summary,
-    runId: run, db: dbName, origin: r.origin, publishedAt: r.published_at,
+    runId: run, db: DBS[db], origin: r.origin, publishedAt: r.published_at,
     forSession: r.for_session, asOf: r.as_of, runMeta: r.run_meta ?? null,
-    loadedAt: iso(cachedAt(`run:${run}`)),
+    loadedAt: iso(cachedAt(`${db}:run:${run}`)),
   })
 }))
 
 app.get('/api/equity', wrap(async (req, res) => {
-  const run = runOf(req)
-  const r = await getRun(run)
-  if (!r) return unpublished(res, run)
+  const run = runOf(req), db = dbOf(req)
+  const r = await getRun(db, run)
+  if (!r) return unpublished(res, run, db)
   const costBps = Number(req.query.costBps ?? 0)
   if (!Number.isFinite(costBps) || costBps < 0) return res.status(400).json({ error: 'costBps must be a number >= 0' })
   const tickers = req.query.tickers
     ? String(req.query.tickers).split(',').map(s => s.trim().toUpperCase()).filter(Boolean) : null
   if (!tickers && (r.costs_bps || []).includes(costBps)) {
-    const pre = await getEquity(run, costBps)
+    const pre = await getEquity(db, run, costBps)
     if (pre) return res.json({ ...pre, precomputed: true })
   }
-  res.json({ ...(await computeEquity(run, { costBps, tickers })), precomputed: false })
+  res.json({ ...(await computeEquity(db, run, { costBps, tickers })), precomputed: false })
 }))
 
 app.get('/api/tickers', wrap(async (req, res) => {
-  const run = runOf(req)
-  const r = await getRun(run)
-  if (!r) return unpublished(res, run)
+  const run = runOf(req), db = dbOf(req)
+  const r = await getRun(db, run)
+  if (!r) return unpublished(res, run, db)
   res.json(r.tickers || [])
 }))
 
 app.get('/api/next-session', wrap(async (req, res) => {
-  const run = runOf(req)
-  const rows = await getNextSession(run)
+  const run = runOf(req), db = dbOf(req)
+  const rows = await getNextSession(db, run)
   res.json({
     forSession: rows[0]?.forSession ?? null,
     asOf: rows[0]?.asOf ?? null,
     up: rows.filter(r => r.pred > 0).length,
     down: rows.filter(r => r.pred <= 0).length,
     rows,
+  })
+}))
+
+/**
+ * ResearchGateEOD's midrun: next-session guesses from today's PARTIAL bar (IB's price at
+ * midrunAsOf taken as the close), same shape as /api/next-session. Always the eod
+ * database — only it has a midrun. 404 until one has been published.
+ */
+app.get('/api/midrun', wrap(async (req, res) => {
+  const run = runOf(req)
+  const { rows, meta } = await getMidrun(run)
+  if (!rows.length) {
+    return res.status(404).json({
+      error: `no midrun published to ${DBS.eod} for run "${run}"`,
+      hint: 'bash scripts/midrun.sh (ResearchGateEOD repo)',
+    })
+  }
+  res.json({
+    db: DBS.eod,
+    forSession: meta?.for_session ?? rows[0].forSession,
+    asOf: rows[0].asOf,
+    officialAsOf: rows[0].officialAsOf,
+    midrunAsOf: meta?.midrun_as_of ?? null,
+    publishedAt: meta?.published_at ?? null,
+    up: rows.filter(r => r.pred > 0).length,
+    down: rows.filter(r => r.pred <= 0).length,
+    fromMidrunBar: rows.filter(r => r.bar === 'midrun').length,
+    rows,
+    loadedAt: iso(cachedAt(`eod:midrun:${run}`)),
   })
 }))
 
@@ -127,10 +161,10 @@ app.get('/api/live-price', wrap(async (req, res) => {
 }))
 
 app.get('/api/strategy', wrap(async (req, res) => {
-  const run = runOf(req)
-  const r = await getRun(run)
-  if (!r) return unpublished(res, run)
-  const rows = await getStrategyList(run)
+  const run = runOf(req), db = dbOf(req)
+  const r = await getRun(db, run)
+  if (!r) return unpublished(res, run, db)
+  const rows = await getStrategyList(db, run)
   if (!rows.length) {
     return res.status(404).json({
       error: `run "${run}" has no stop-loss strategy published`,
@@ -144,13 +178,13 @@ app.get('/api/strategy', wrap(async (req, res) => {
     stops: rows[0].stops ?? [],
     startCapital: rows[0].startCapital ?? null,
     rows,
-    loadedAt: iso(cachedAt(`strat:${run}`)),
+    loadedAt: iso(cachedAt(`${db}:strat:${run}`)),
   })
 }))
 
 app.get('/api/strategy/:ticker', wrap(async (req, res) => {
-  const run = runOf(req)
-  const doc = await getStrategyTicker(run, req.params.ticker)
+  const run = runOf(req), db = dbOf(req)
+  const doc = await getStrategyTicker(db, run, req.params.ticker)
   if (!doc) {
     return res.status(404).json({
       error: `no strategy for ${String(req.params.ticker).toUpperCase()} in run "${run}"`,
@@ -160,11 +194,11 @@ app.get('/api/strategy/:ticker', wrap(async (req, res) => {
 }))
 
 app.get('/api/predictions', wrap(async (req, res) => {
-  res.json(await queryPredictions(runOf(req), req.query))
+  res.json(await queryPredictions(dbOf(req), runOf(req), req.query))
 }))
 
-app.get('/api/runs', wrap(async (_req, res) => {
-  const runs = await listRuns()
+app.get('/api/runs', wrap(async (req, res) => {
+  const runs = await listRuns(dbOf(req))
   res.json(runs.map(r => ({
     runId: r._id, publishedAt: r.published_at, origin: r.origin, rows: r.rows,
     rowsInMongo: r.predictions_in_mongo, maxDate: r.max_date, forSession: r.for_session,

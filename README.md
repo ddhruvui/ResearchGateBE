@@ -20,8 +20,15 @@ repo does that — the daily pod runs it automatically after each run.
 | `GET /api/next-session` | tomorrow's paper-trade predictions with the up/down split |
 | `GET /api/predictions?ticker=AAPL,MSFT&from=2026-01-01&to=&source=live&page=1&limit=500` | graded rows, paginated (max 5000/page) |
 | `GET /api/runs` | every published run and when it was published |
+| `GET /api/midrun` | ResearchGateEOD's intraday guess per ticker, as if IB's price at `midrunAsOf` were today's close; same row shape as `/api/next-session` plus `officialClose` / `officialAsOf` |
 
 Every endpoint accepts `?run=<run_id>`; the default is `RUN_ID`.
+
+Every endpoint also accepts `?db=rg|eod` (default `rg`). `eod` reads the
+`ResearchGateEOD` database instead of `ResearchGate` — the dashboard's **Midrun**
+switch. It is a fixed key, not a database name: anything else is a 400, so a
+request can never point the API at another database. `/api/midrun` always reads
+`eod`; nothing else has a midrun.
 
 ## Environment
 
@@ -30,6 +37,7 @@ Every endpoint accepts `?run=<run_id>`; the default is `RUN_ID`.
 | `MONGO_URI` | Atlas connection string. May keep the `<db_password>` placeholder |
 | `DB_PASSWORD` | substituted for `<db_password>`, URL-encoded |
 | `MONGO_DB` | database, default `ResearchGate` |
+| `MONGO_DB_EOD` | database behind `?db=eod`, default `ResearchGateEOD` |
 | `RUN_ID` | run served by default, `pso_lssvm_v1` |
 | `ALLOWED_ORIGINS` | CORS allow-list, comma-separated; `*` by default |
 | `EDGE_CACHE_S` | seconds Vercel's edge may cache a response, default 60 |
