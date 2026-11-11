@@ -19,6 +19,9 @@ repo does that — the daily pod runs it automatically after each run.
 | `GET /api/tickers` | per-ticker leaderboard |
 | `GET /api/next-session` | tomorrow's paper-trade predictions with the up/down split |
 | `GET /api/predictions?ticker=AAPL,MSFT&from=2026-01-01&to=&source=live&page=1&limit=500` | graded rows, paginated (max 5000/page) |
+| `GET /api/strategy` | the $10k-per-stock stop-loss paper trade: rollup + per-ticker totals |
+| `GET /api/strategy/:ticker` | one stock, including the daily balance series per stop level |
+| `GET /api/ranges` | the 2-week swing per stock: the latest 10-session high/low and the past-year / since-2021 distribution of every window (percentiles + 0.5% histogram). Always reads `ResearchGate`, whatever `?db=` says — it comes from the price bars alone |
 | `GET /api/runs` | every published run and when it was published |
 | `GET /api/midrun` | ResearchGateEOD's intraday guess per ticker, as if IB's price at `midrunAsOf` were today's close; same row shape as `/api/next-session` plus `officialClose` / `officialAsOf` |
 
@@ -71,3 +74,5 @@ Every push to `main` redeploys.
 | `equity` | `run_id:costBps` | pre-computed curve for each UI cost level |
 | `next_session` | `run_id:ticker` | the current ungraded guess |
 | `predictions` | `run_id:ticker:date` | every graded row, as scored |
+| `strategy` | `run_id:ticker` | the stop-loss paper trade, balance series included |
+| `ranges` | `run_id:ticker` | the 2-week swing: latest window + distribution, replaced on every publish |

@@ -8,6 +8,7 @@ import cors from 'cors'
 import {
   DBS, defaultRun, cachedAt, getRun, getEquity, computeEquity,
   getNextSession, queryPredictions, listRuns, getStrategyList, getStrategyTicker, getMidrun,
+  getRanges,
 } from '../lib/data.js'
 import { dbKeyOf } from '../lib/db.js'
 import { liveQuotes } from '../lib/quotes.js'
@@ -48,6 +49,7 @@ const ENDPOINTS = {
   '/api/predictions?ticker=A,B&from=YYYY-MM-DD&to=&source=live|backtest&page=1&limit=500': 'graded rows',
   '/api/strategy': '$10k-per-stock stop-loss paper trade: rollup + per-ticker totals',
   '/api/strategy/:ticker': 'one stock, including the daily balance series per stop level',
+  '/api/ranges': '2-week swing per stock: the latest 10-session high/low and its past-year / since-2021 distribution (always the ResearchGate db)',
   '/api/runs': 'every published run',
 }
 
@@ -191,6 +193,34 @@ app.get('/api/strategy/:ticker', wrap(async (req, res) => {
     })
   }
   res.json({ runId: run, ...doc })
+}))
+
+/**
+ * The 2-week swing table. Reads the ResearchGate database whatever ?db= says: the
+ * numbers come from the price bars alone (see getRanges), so the midrun toggle
+ * shows the same table rather than an empty one.
+ */
+app.get('/api/ranges', wrap(async (req, res) => {
+  const run = runOf(req)
+  const r = await getRun('rg', run)
+  if (!r) return unpublished(res, run, 'rg')
+  const rows = await getRanges(run)
+  if (!rows.length) {
+    return res.status(404).json({
+      error: `run "${run}" has no 2-week swing table published`,
+      hint: 'python3 -m src.ranges && python3 -m src.publish_mongo (ResearchGate repo)',
+    })
+  }
+  const meta = r.ranges ?? null
+  res.json({
+    runId: run,
+    asOf: meta?.asOf ?? null,
+    window: meta?.window ?? null,
+    periods: meta?.periods ?? null,
+    meta,
+    rows,
+    loadedAt: iso(cachedAt(`rg:ranges:${run}`)),
+  })
 }))
 
 app.get('/api/predictions', wrap(async (req, res) => {
