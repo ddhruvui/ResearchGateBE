@@ -22,6 +22,7 @@ repo does that — the daily pod runs it automatically after each run.
 | `GET /api/strategy` | the $10k-per-stock stop-loss paper trade: rollup + per-ticker totals |
 | `GET /api/strategy/:ticker` | one stock, including the daily balance series per stop level |
 | `GET /api/ranges` | the 2-week swing per stock: the latest 10-session high/low and the past-year / since-2021 distribution of every window (percentiles + 0.5% histogram). Always reads `ResearchGate`, whatever `?db=` says — it comes from the price bars alone |
+| `GET /api/last-price` | every ticker's latest uploaded price, `{ db, uploadedAt, prices: { AAPL: 358.34, … } }`, from the `LastPrice` database (see below). Not tied to a run or `?db=` |
 | `GET /api/runs` | every published run and when it was published |
 | `GET /api/midrun` | ResearchGateEOD's intraday guess per ticker, as if IB's price at `midrunAsOf` were today's close; same row shape as `/api/next-session` plus `officialClose` / `officialAsOf` |
 
@@ -41,6 +42,7 @@ request can never point the API at another database. `/api/midrun` always reads
 | `DB_PASSWORD` | substituted for `<db_password>`, URL-encoded |
 | `MONGO_DB` | database, default `ResearchGate` |
 | `MONGO_DB_EOD` | database behind `?db=eod`, default `ResearchGateEOD` |
+| `LAST_PRICE_DB` | database behind `/api/last-price`, default `LastPrice` |
 | `RUN_ID` | run served by default, `pso_lssvm_v1` |
 | `ALLOWED_ORIGINS` | CORS allow-list, comma-separated; `*` by default |
 | `EDGE_CACHE_S` | seconds Vercel's edge may cache a response, default 60 |
@@ -76,3 +78,9 @@ Every push to `main` redeploys.
 | `predictions` | `run_id:ticker:date` | every graded row, as scored |
 | `strategy` | `run_id:ticker` | the stop-loss paper trade, balance series included |
 | `ranges` | `run_id:ticker` | the 2-week swing: latest window + distribution, replaced on every publish |
+
+One more database on the same cluster, read by `/api/last-price` only:
+`LastPrice`, collection `LastPrice`, one document `_id: 'latest'`
+(`{ uploadedAt, values: [{ ticker, price }] }`). ResearchGateEOD's
+`src.yahoo_last_price` rewrites it every 10 minutes from Sunday 20:00 to Friday
+20:00 New York time. It sits outside `?db=`, so a request can never name it.

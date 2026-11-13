@@ -8,7 +8,7 @@ import cors from 'cors'
 import {
   DBS, defaultRun, cachedAt, getRun, getEquity, computeEquity,
   getNextSession, queryPredictions, listRuns, getStrategyList, getStrategyTicker, getMidrun,
-  getRanges,
+  getRanges, getLastPrices, lastPriceDbName,
 } from '../lib/data.js'
 import { dbKeyOf } from '../lib/db.js'
 import { liveQuotes } from '../lib/quotes.js'
@@ -45,6 +45,7 @@ const ENDPOINTS = {
   '/api/tickers': 'per-ticker leaderboard',
   '/api/next-session': "tomorrow's paper-trade predictions",
   '/api/midrun': "ResearchGateEOD's intraday prediction, as if IB's price were today's close",
+  '/api/last-price': 'every ticker\'s latest uploaded price, from the LastPrice database (refreshed every 10 minutes)',
   '/api/live-price?tickers=A,B': 'current EODHD price per ticker, never cached',
   '/api/predictions?ticker=A,B&from=YYYY-MM-DD&to=&source=live|backtest&page=1&limit=500': 'graded rows',
   '/api/strategy': '$10k-per-stock stop-loss paper trade: rollup + per-ticker totals',
@@ -146,7 +147,19 @@ app.get('/api/midrun', wrap(async (req, res) => {
 }))
 
 /**
- * The price column behind the button on "Tomorrow's prediction". Deliberately
+ * The price column on "Tomorrow's prediction" before anyone presses the button: the
+ * LastPrice document ResearchGateEOD uploads every 10 minutes. Not tied to a run or
+ * to ?db=, so the Midrun switch shows the same prices. The edge may revalidate for
+ * one more TTL rather than the usual five: the document is only 10 minutes fresh.
+ */
+app.get('/api/last-price', wrap(async (_req, res) => {
+  res.set('Cache-Control', `public, s-maxage=${MAXAGE}, stale-while-revalidate=${MAXAGE}`)
+  const { uploadedAt, prices } = await getLastPrices()
+  res.json({ db: lastPriceDbName, uploadedAt, prices, loadedAt: iso(cachedAt('lastprice')) })
+}))
+
+/**
+ * The live price behind the button on "Tomorrow's prediction". Deliberately
  * uncached at every layer — the caller asked for the tape as it is right now,
  * and a 60 s edge cache would quietly serve them a stale one.
  */
