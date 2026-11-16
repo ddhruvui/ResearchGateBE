@@ -8,7 +8,7 @@ import cors from 'cors'
 import {
   DBS, defaultRun, cachedAt, getRun, getEquity, computeEquity,
   getNextSession, queryPredictions, listRuns, getStrategyList, getStrategyTicker, getMidrun,
-  getRanges, getLastPrices, lastPriceDbName,
+  getRanges, getLastPrices, lastPriceDbName, getOpenPositions, tradesDbName,
 } from '../lib/data.js'
 import { dbKeyOf } from '../lib/db.js'
 import { liveQuotes } from '../lib/quotes.js'
@@ -47,6 +47,7 @@ const ENDPOINTS = {
   '/api/midrun': "ResearchGateEOD's intraday prediction, as if IB's price were today's close",
   '/api/last-price': 'every ticker\'s latest uploaded price, from the LastPrice database (refreshed every 10 minutes)',
   '/api/live-price?tickers=A,B': 'current EODHD price per ticker, never cached',
+  '/api/open-positions': 'every stock with an open trade in TradeTracker\'s StockTracker database: ticker and side only (read-only)',
   '/api/predictions?ticker=A,B&from=YYYY-MM-DD&to=&source=live|backtest&page=1&limit=500': 'graded rows',
   '/api/strategy': '$10k-per-stock stop-loss paper trade: rollup + per-ticker totals',
   '/api/strategy/:ticker': 'one stock, including the daily balance series per stop level',
@@ -156,6 +157,22 @@ app.get('/api/last-price', wrap(async (_req, res) => {
   res.set('Cache-Control', `public, s-maxage=${MAXAGE}, stale-while-revalidate=${MAXAGE}`)
   const { uploadedAt, prices } = await getLastPrices()
   res.json({ db: lastPriceDbName, uploadedAt, prices, loadedAt: iso(cachedAt('lastprice')) })
+}))
+
+/**
+ * The stocks with an open trade in TradeTracker's StockTracker database, for the table
+ * at the top of the dashboard. Ticker and side only (see getOpenPositions). Not tied to
+ * a run or to ?db=: Official and Midrun list the same positions, each with its own call.
+ * Read-only, like everything here.
+ */
+app.get('/api/open-positions', wrap(async (_req, res) => {
+  const rows = await getOpenPositions()
+  res.json({
+    db: tradesDbName,
+    trades: rows.reduce((n, r) => n + r.trades, 0),
+    rows,
+    loadedAt: iso(cachedAt('trades:open')),
+  })
 }))
 
 /**
